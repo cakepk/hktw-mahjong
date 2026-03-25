@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>港式台牌小帳本 (倍半/拉莊特化版)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .bg-mahjong { background-color: #064e3b; }
+        .text-mahjong { color: #064e3b; }
+        .border-mahjong { border-color: #064e3b; }
+        .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+        .transition-all { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .btn-tab.active { background-color: #064e3b; color: white; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(6, 78, 59, 0.2); }
+        .pending-card { background: linear-gradient(135deg, #064e3b 0%, #065f46 100%); }
+        /* Modal & Toast Styles */
+        .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(4px); z-index: 100; align-items: center; justify-content: center; }
+        .modal-backdrop.active { display: flex; }
+        #toast { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: #334155; color: white; padding: 12px 24px; border-radius: 12px; font-weight: bold; font-size: 14px; z-index: 200; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        #toast.active { opacity: 1; }
+        /* Calc Button State Styles */
+        .btn-fan.active, #extra-fan-card.active { background-color: #064e3b !important; border-color: #064e3b !important; }
+        .btn-fan.active .target-name, #extra-fan-card.active p:first-child { color: white !important; }
+        .btn-fan.active .target-fan, #extra-fan-card.active #extra-fan-display { color: #86efac !important; }
+        .btn-fan.active .target-example { color: #dcfce7 !important; }
+        .btn-fan.active .target-example span { color: #1e293b !important; }
+    </style>
+</head>
+<body class="pb-24">
+
+    <!-- Navbar -->
+    <nav class="sticky top-0 z-50 glass border-b border-slate-200 px-6 py-4">
+        <div class="max-w-5xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-mahjong text-white flex items-center justify-center rounded-xl shadow-lg ring-2 ring-green-100">🀄</div>
+                <h1 class="text-xl font-black text-mahjong italic">港式台牌小帳本</h1>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="undoLastAction()" class="px-4 py-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 transition-all font-bold text-xs flex items-center gap-2">
+                    <i class="fa-solid fa-undo text-xs"></i> 復原上一手
+                </button>
+                <button onclick="resetGame()" class="px-4 py-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all font-bold text-xs flex items-center gap-2">
+                    <i class="fa-solid fa-trash-can text-xs"></i> 重啟
+                </button>
+            </div>
+        </div>
+        <!-- Tab Switcher -->
+        <div class="max-w-5xl mx-auto mt-6 flex p-1 bg-slate-100 rounded-2xl">
+            <button onclick="switchTab('teach')" id="tab-teach" class="btn-tab flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase transition-all tracking-widest active">📚 教學</button>
+            <button onclick="switchTab('calc')" id="tab-calc" class="btn-tab flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase transition-all tracking-widest opacity-60">🧮 計番</button>
+            <button onclick="switchTab('ledger')" id="tab-ledger" class="btn-tab flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase transition-all tracking-widest opacity-60">💰 記帳</button>
+        </div>
+    </nav>
+
+    <main class="max-w-5xl mx-auto px-6 py-8">
+
+        <!-- Tab 1: 教學 -->
+        <div id="view-teach" class="tab-view space-y-12">
+            <section class="space-y-6">
+                <h3 class="text-2xl font-black text-slate-800 flex items-center gap-3">
+                    <i class="fa-solid fa-gavel text-mahjong"></i> 玩家自訂與爭議規則
+                </h3>
+                <div id="rules-grid" class="grid md:grid-cols-2 gap-4 text-sm"></div>
+            </section>
+            <section class="space-y-6">
+                <h3 class="text-2xl font-black text-slate-800 flex items-center gap-3">
+                    <i class="fa-solid fa-bolt text-mahjong"></i> 即時付錢項目 (Instant Pay)
+                </h3>
+                <div id="instant-pay-grid" class="grid md:grid-cols-3 gap-4 text-sm"></div>
+            </section>
+            <section class="space-y-6">
+                <h3 class="text-2xl font-black text-slate-800 flex items-center gap-3">
+                    <i class="fa-solid fa-table-list text-mahjong"></i> 完整番數表
+                </h3>
+                <div id="teach-table-container" class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto"></div>
+
+                <!-- Attribution Section -->
+                <div class="mt-12 pt-8 border-t border-slate-100 text-center space-y-3">
+                    <p class="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em]">鳴謝 (Special Thanks)</p>
+                    <p class="text-xs font-bold text-slate-500 leading-relaxed">
+                        本工具使用之麻雀圖標資源取自 GitHub 
+                        <a href="https://github.com/FluffyStuff/riichi-mahjong-tiles" target="_blank" class="text-mahjong underline hover:text-mahjong/80 transition-colors">@FluffyStuff</a>，特此致謝。
+                    </p>
+                    <p class="text-[9px] text-slate-300 italic">Licensed under CC0 1.0 Universal (Public Domain)</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- Tab 2: 計番機 -->
+        <div id="view-calc" class="tab-view hidden space-y-8">
+            <!-- Dealer Status Board -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div id="dealer-status-card" class="p-5 bg-white rounded-3xl border-2 border-mahjong/20 flex flex-col items-center justify-center text-center">
+                    <div class="flex items-center gap-2 mb-2">
+                        <div id="wind-badge" class="w-8 h-8 bg-mahjong text-white rounded-full flex items-center justify-center text-sm font-bold shadow-md">東</div>
+                        <div class="text-left leading-tight">
+                            <p class="font-black text-slate-800 text-sm">
+                                <span id="round-text" class="text-mahjong mr-1">東圈</span><span id="dealer-name">玩家A</span>
+                            </p>
+                            <div class="flex items-center gap-1">
+                                <p id="dealer-streak-text" class="text-[9px] font-bold text-slate-400">連莊: 0 (平庄)</p>
+                                <button onclick="manualDraw()" class="text-[8px] px-1.5 py-0.5 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded font-black transition-colors active:scale-90" title="流局 (連莊+1)">+1</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="dice-icons" class="flex gap-1 justify-center items-center h-6">
+                        <i class="fa-solid fa-dice-one text-slate-200 text-lg"></i>
+                    </div>
+                </div>
+                <button onclick="addExtraFans()" id="extra-fan-card" class="p-5 bg-white rounded-3xl border border-slate-200 flex flex-col justify-center text-center shadow-sm hover:scale-[1.02] active:scale-95 transition-all group">
+                    <p class="text-[10px] font-black uppercase text-slate-400 group-hover:text-mahjong transition-colors">點擊加入庄家加成</p>
+                    <p id="extra-fan-display" class="text-2xl font-black text-mahjong mt-1">+1 Extra</p>
+                </button>
+                <div class="p-5 bg-mahjong text-white rounded-3xl flex flex-col justify-center text-center shadow-xl">
+                    <p class="text-[10px] font-black uppercase text-white/50">最終總番數 (可手動)</p>
+                    <div class="flex justify-center items-end gap-1 mt-1">
+                        <input type="number" id="manual-tai-input" class="w-16 bg-transparent text-3xl font-black text-white text-center outline-none border-b-2 border-white/30 focus:border-white transition-colors" value="0" min="0" oninput="updateAllUI()">
+                        <span class="text-lg font-bold opacity-80 mb-1">番</span>
+                    </div>
+                </div>
+                <!-- Settle Button moved to the right of Total Fan -->
+                <button onclick="switchTab('ledger')" class="p-5 bg-orange-500 text-white rounded-3xl flex flex-col items-center justify-center text-center shadow-xl hover:scale-[1.02] active:scale-95 transition-all outline-none focus:ring-4 focus:ring-orange-500/30">
+                    <i class="fa-solid fa-calculator text-2xl mb-1 opacity-90"></i>
+                    <span class="font-black text-lg">即時結算</span>
+                    <span class="text-[9px] font-bold uppercase opacity-80 tracking-widest mt-1">Settle</span>
+                </button>
+            </div>
+
+            <!-- Tai Selection Section -->
+            <div class="space-y-4">
+                <div class="flex justify-between items-center px-2">
+                    <h4 class="text-sm font-black text-slate-800">選擇牌型 (按類別分組)</h4>
+                    <button onclick="clearCalcSelections()" class="text-xs font-bold text-red-500 hover:text-red-600 transition-colors bg-red-50 px-3 py-1.5 rounded-lg">清空選擇</button>
+                </div>
+                <div id="calc-categories-container" class="space-y-8"></div>
+            </div>
+        </div>
+
+        <!-- Tab 3: 記帳本 (SPECIAL) -->
+        <div id="view-ledger" class="tab-view hidden space-y-8">
+            
+            <!-- Context & Balances Side-by-Side -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                
+                <!-- Game Context Bar (Left Side) -->
+                <div class="lg:col-span-4 flex items-center gap-4 bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm h-full">
+                    <div id="ledger-wind-badge" class="w-12 h-12 bg-mahjong text-white flex items-center justify-center rounded-full font-black text-xl shadow-inner">--</div>
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2">
+                            <span id="ledger-round-text" class="text-base font-black text-mahjong uppercase tracking-wider">--圈</span>
+                            <span id="ledger-dealer-name" class="text-base font-bold text-slate-800">--</span>
+                        </div>
+                        <p id="ledger-dealer-streak-text" class="text-xs font-bold text-slate-400">連莊: --</p>
+                    </div>
+                </div>
+
+                <!-- Balances Section (Right Side) -->
+                <div class="lg:col-span-8 bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col gap-6 h-full">
+                    <div class="flex items-center gap-4 w-full">
+                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 flex-1">
+                            <div id="balance-grid" class="contents"></div>
+                        </div>
+                        
+                        <div class="flex flex-col gap-2">
+                            <button onclick="recordDraw()" class="p-4 bg-orange-50 border-2 border-orange-100 rounded-3xl hover:border-orange-500 transition-all text-orange-600 font-black flex flex-col items-center gap-1 shadow-sm">
+                                <i class="fa-solid fa-handshake-slash text-xl"></i>
+                                <span class="text-[9px] uppercase tracking-tighter">流局+1</span>
+                            </button>
+                            <button onclick="toggleManualModal(true)" class="p-4 bg-slate-50 border-2 border-slate-100 rounded-3xl hover:border-mahjong transition-all text-mahjong font-black flex flex-col items-center gap-1 shadow-sm">
+                                <i class="fa-solid fa-pen-to-square text-xl"></i>
+                                <span class="text-[9px] uppercase tracking-tighter">平帳</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Instant Pay Row (Integrated) -->
+                    <div class="grid grid-cols-5 gap-2 pt-4 border-t border-slate-50">
+                        <button onclick="openInstantModal('追')" class="py-2 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all text-center border border-slate-100 shadow-sm">
+                            <p class="text-[11px] font-black text-slate-800">追</p>
+                            <p class="text-[8px] font-bold text-slate-400">1底賠全</p>
+                        </button>
+                        <button onclick="openInstantModal('暗槓')" class="py-2 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all text-center border border-slate-100 shadow-sm">
+                            <p class="text-[11px] font-black text-slate-800">暗槓</p>
+                            <p class="text-[8px] font-bold text-slate-400">1底收三</p>
+                        </button>
+                        <button onclick="openInstantModal('一台草')" class="py-2 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all text-center border border-slate-100 shadow-sm">
+                            <p class="text-[11px] font-black text-slate-800">一台草</p>
+                            <p class="text-[8px] font-bold text-slate-400">0.5底收三</p>
+                        </button>
+                        <button onclick="openInstantModal('一台花')" class="py-2 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all text-center border border-slate-100 shadow-sm">
+                            <p class="text-[11px] font-black text-slate-800">一台花</p>
+                            <p class="text-[8px] font-bold text-slate-400">1底收三</p>
+                        </button>
+                        <button onclick="openInstantModal('詐胡')" class="py-2 bg-red-50 hover:bg-red-100 rounded-xl transition-all text-center border border-red-100 shadow-sm">
+                            <p class="text-[11px] font-black text-red-600">詐胡</p>
+                            <p class="text-[8px] font-bold text-red-400">30番賠全</p>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+
+
+            <!-- Pending Debt Board (Core Feature) -->
+            <div id="pending-debt-board" class="pending-card p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden">
+                <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32 blur-3xl"></div>
+                <div class="relative z-10 space-y-6">
+                    <div class="flex justify-between items-center">
+                        <h4 class="text-2xl font-black flex items-center gap-3">
+                            <i class="fa-solid fa-hourglass-start animate-pulse"></i> 當前暫存債務 (Pending)
+                        </h4>
+                        <span class="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">倍半系統啟動中</span>
+                    </div>
+                    <div id="pending-debt-content" class="grid md:grid-cols-2 gap-8 py-4 border-t border-white/10">
+                        <!-- Debt data will be here -->
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- Record Form -->
+            <div class="bg-white p-8 rounded-[3.5rem] shadow-sm border border-slate-100 space-y-8">
+                <div class="grid grid-cols-2 lg:grid-cols-5 gap-6">
+                    <div class="space-y-3">
+                        <label class="text-[10px] font-black uppercase text-slate-400">食糊者 (Winner)</label>
+                        <select id="winner-select" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-mahjong/10 font-black"></select>
+                    </div>
+                    <div class="space-y-3">
+                        <label class="text-[10px] font-black uppercase text-slate-400">出銃者 / 自摸</label>
+                        <select id="loser-select" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-4 focus:ring-mahjong/10 font-black"></select>
+                    </div>
+                    <div class="space-y-3">
+                        <label class="text-[10px] font-black uppercase text-slate-400">番數 (Fans)</label>
+                        <input type="number" id="ledger-fans-preview" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-xl text-center text-slate-700 outline-none focus:ring-4 focus:ring-mahjong/10 transition-all" value="0" min="0" oninput="syncFansToCalc(this.value)">
+                    </div>
+                    <div class="space-y-3">
+                        <label class="text-[10px] font-black uppercase text-slate-400">底 (Base)</label>
+                        <div id="ledger-base-preview" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-xl text-center text-slate-700">$0</div>
+                    </div>
+                    <div class="space-y-3">
+                        <label class="text-[10px] font-black uppercase text-slate-400">當前金額基數</label>
+                        <div class="w-full p-4 bg-mahjong/5 text-mahjong font-black text-2xl rounded-2xl flex flex-col items-center justify-center border border-mahjong/10">
+                            <div id="amount-preview">$--</div>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="recordSpecialTransaction()" class="w-full py-6 bg-mahjong text-white rounded-[2rem] font-black text-xl shadow-xl hover:scale-[1.01] transition-all">
+                    確認入帳 (APPLY BUSINESS LOGIC)
+                </button>
+            </div>
+
+            <!-- Transaction Log Table (Audit) -->
+            <section class="space-y-4">
+                <div class="flex justify-between items-center px-4">
+                    <h4 class="text-xs font-black uppercase text-slate-400">流水帳紀錄 (Transaction Log)</h4>
+                    <span id="history-count" class="px-3 py-1 bg-slate-100 rounded-full text-[10px] font-black text-slate-400 uppercase tracking-widest">0 條紀錄</span>
+                </div>
+                <div class="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+                    <div class="max-h-[500px] overflow-y-auto overflow-x-auto custom-scrollbar">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-50 border-b border-slate-100 sticky top-0 z-20">
+                            <tr class="text-[10px] font-black uppercase text-slate-400 tracking-widest text-left">
+                                <th class="px-6 py-4 bg-slate-50">局數</th>
+                                <th class="px-6 py-4 bg-slate-50">贏家</th>
+                                <th class="px-6 py-4 bg-slate-50">輸家</th>
+                                <th class="px-6 py-4 bg-slate-50">番數</th>
+                                <th class="px-6 py-4 bg-slate-50">金額變動</th>
+                                <th class="px-6 py-4 bg-slate-50">備註</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-table-body" class="divide-y divide-slate-50 bg-white">
+                            <!-- Rows will be here -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+                <!-- Settings Panel -->
+                <div class="md:w-[22rem] bg-slate-50 p-6 rounded-3xl space-y-6 self-start sticky top-24">
+                    <h5 class="font-black text-sm text-slate-800">遊戲與玩家設定</h5>
+                    
+                    <div class="space-y-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="text-[10px] font-bold uppercase text-slate-400">底注 (Base)</label><input type="number" id="base-val" class="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold" value="10"></div>
+                            <div><label class="text-[10px] font-bold uppercase text-slate-400">番價 (Rate)</label><input type="number" id="rate-val" class="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold" value="5"></div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3 pt-2 border-t border-slate-200/60">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="text-[10px] font-bold uppercase text-slate-400">玩家 1 (東)</label><input type="text" id="p1-val" class="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold" value="玩家A"></div>
+                            <div><label class="text-[10px] font-bold uppercase text-slate-400">玩家 2 (南)</label><input type="text" id="p2-val" class="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold" value="玩家B"></div>
+                            <div><label class="text-[10px] font-bold uppercase text-slate-400">玩家 3 (西)</label><input type="text" id="p3-val" class="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold" value="玩家C"></div>
+                            <div><label class="text-[10px] font-bold uppercase text-slate-400">玩家 4 (北)</label><input type="text" id="p4-val" class="w-full p-3 bg-white rounded-xl border border-slate-200 font-bold" value="玩家D"></div>
+                        </div>
+                    </div>
+
+                    <button onclick="saveSpecialSettings()" class="w-full py-3 bg-slate-800 hover:bg-slate-700 transition-colors text-white rounded-xl text-sm font-bold shadow-md">儲存並更新介面</button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Manual Adjustment Modal -->
+    <div id="manual-modal" class="modal-backdrop">
+        <div class="bg-white w-[90%] max-w-lg p-8 rounded-[3rem] shadow-2xl space-y-8">
+            <div class="flex justify-between items-center">
+                <h3 class="text-xl font-black text-slate-800">✏️ 手動平帳 (Manual Adj)</h3>
+                <button onclick="toggleManualModal(false)" class="text-slate-300 hover:text-red-500 text-xl"><i class="fa-solid fa-circle-xmark"></i></button>
+            </div>
+            <div class="grid grid-cols-2 gap-6">
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black uppercase text-slate-400">付款人 (Payer)</label>
+                    <select id="adj-payer" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black"></select>
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-black uppercase text-slate-400">收款人 (Payee)</label>
+                    <select id="adj-payee" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black"></select>
+                </div>
+                <div class="col-span-full space-y-2">
+                    <label class="text-[10px] font-black uppercase text-slate-400">金額 (Amount)</label>
+                    <input type="number" id="adj-amount" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-xl" placeholder="輸入金額">
+                </div>
+                <div class="col-span-full space-y-2">
+                    <label class="text-[10px] font-black uppercase text-slate-400">備註 (Remarks)</label>
+                    <input type="text" id="adj-remark" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" placeholder="例如：飯錢、借錢...">
+                </div>
+            </div>
+            <button onclick="submitManualAdjustment()" class="w-full py-5 bg-slate-800 text-white rounded-2xl font-black hover:scale-[1.02] transition-all">確認入帳 (POST MANUAL)</button>
+        </div>
+    </div>
+
+    <!-- Instant Pay Modal -->
+    <div id="instant-modal" class="modal-backdrop">
+        <div class="bg-white w-[90%] max-w-sm p-8 rounded-[3rem] shadow-2xl space-y-8">
+            <div class="text-center space-y-2">
+                <h3 id="instant-modal-title" class="text-2xl font-black text-slate-800">選擇玩家</h3>
+                <p id="instant-modal-desc" class="text-xs font-bold text-slate-400 uppercase tracking-widest">誰人賠款 / 收費？</p>
+            </div>
+            <div id="instant-player-list" class="grid grid-cols-1 gap-3">
+                <!-- Buttons will be generated here -->
+            </div>
+            <button onclick="toggleInstantModal(false)" class="w-full py-4 text-slate-400 font-bold hover:text-slate-600 transition-colors">取消 (CANCEL)</button>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast"></div>
+
+    <script src="data.js"></script>
+    <script src="logic.js"></script>
+</body>
+</html>
