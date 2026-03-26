@@ -349,9 +349,12 @@ function updateAllUI() {
         gameState.players.forEach((p, i) => {
             if (i === pd.creditorIndex) return;
             debtHTML += `
-                <div class="bg-white/10 p-4 rounded-2xl flex flex-col justify-center text-center">
+                <div class="bg-white/10 p-4 rounded-2xl flex flex-col justify-center text-center relative group">
                     <p class="text-[9px] font-black text-white/40 uppercase mb-1">${p}</p>
-                    <p class="text-lg font-black text-yellow-400">$${pd.debts[i] || 0}</p>
+                    <p class="text-lg font-black text-yellow-400 leading-none">$${pd.debts[i] || 0}</p>
+                    ${pd.debts[i] > 0 ? `
+                        <button onclick="settleIndividualDebt(${i})" class="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-lg hover:bg-red-600 transition-all opacity-0 group-hover:opacity-100 ring-2 ring-white">清</button>
+                    ` : ''}
                 </div>
             `;
         });
@@ -635,5 +638,51 @@ function switchTab(tabId) {
     document.getElementById(`tab-${tabId}`).classList.add('active', 'opacity-100');
     window.scrollTo(0, 0);
 }
+
+// --- Settlement (截數) ---
+window.settleIndividualDebt = function(playerIndex) {
+    console.log("Settling debt for player:", playerIndex);
+    const pd = gameState.pendingDebts;
+    if (pd.creditorIndex === -1 || !pd.debts || pd.debts[playerIndex] === undefined) {
+        console.error("Invalid settlement state:", pd);
+        return;
+    }
+
+    const amount = pd.debts[playerIndex];
+    if (amount <= 0) return;
+
+    // Record the settlement in permanent balances
+    gameState.balances[pd.creditorIndex] += amount;
+    gameState.balances[playerIndex] -= amount;
+
+    // Add to transaction history
+    gameState.history.push({
+        round: "截數",
+        winner: gameState.players[pd.creditorIndex],
+        loser: gameState.players[playerIndex],
+        tai: "-",
+        amount: amount,
+        remark: `⚡ 截數 (找清欠 ${gameState.players[pd.creditorIndex]} 的 $${amount})`
+    });
+
+    // Clear the specific debt
+    pd.debts[playerIndex] = 0;
+
+    // Check if all debts are cleared
+    const remainingDebt = Object.values(pd.debts).reduce((a, b) => a + (b || 0), 0);
+    if (remainingDebt === 0) {
+        pd.creditorIndex = -1;
+    }
+
+    // CRITICAL: Must use the correct save function name
+    if (typeof saveState === 'function') {
+        saveState();
+    } else if (typeof save === 'function') {
+        save();
+    }
+    
+    updateAllUI();
+    showNotice(`${gameState.players[playerIndex]} 已截數找清`);
+};
 
 document.addEventListener("DOMContentLoaded", init);
