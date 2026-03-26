@@ -13,7 +13,7 @@ const gameState = {
     settings: { base: 5, rate: 1 },
     dealerIndex: 0,
     dealerStreak: 0,
-    pendingDebts: { creditorIndex: -1, debts: { 0: 0, 1: 0, 2: 0, 3: 0 } },
+    pendingDebts: [], // Array of { creditor: index, debtor: index, amount: number }
     history: [],
     historyStack: []
 };
@@ -38,8 +38,15 @@ function preloadSVGs() {
 }
 
 function init() {
-    const saved = localStorage.getItem('mahjong_special_v1');
-    if (saved) Object.assign(gameState, JSON.parse(saved));
+    const savedString = localStorage.getItem('mahjong_special_v1');
+    if (savedString) {
+        const saved = JSON.parse(savedString);
+        // Migration: Ensure pendingDebts is an array (Handle legacy object format)
+        if (saved.pendingDebts && !Array.isArray(saved.pendingDebts)) {
+            saved.pendingDebts = [];
+        }
+        Object.assign(gameState, saved);
+    }
     if (gameState.roundIndex === undefined) gameState.roundIndex = 0;
     if (gameState.extraActive === undefined) gameState.extraActive = false;
     
@@ -59,14 +66,23 @@ function init() {
 }
 
 function save() {
-    localStorage.setItem('mahjong_special_v1', JSON.stringify(gameState));
+    // Save state but EXCLUDE historyStack to stay under 5MB quota
+    const { historyStack, ...persistentState } = gameState;
+    try {
+        localStorage.setItem('mahjong_special_v1', JSON.stringify(persistentState));
+    } catch (e) {
+        console.error("Storage Error:", e);
+        showNotice('記憶體已滿，請按「重啟」清空紀錄！');
+    }
     updateAllUI();
 }
 
 function pushHistory() {
-    const snapshot = JSON.parse(JSON.stringify(gameState));
+    // Snapshot state EXCLUDING the stack itself (Fix recursive leak)
+    const { historyStack, ...clone } = gameState;
+    const snapshot = JSON.parse(JSON.stringify(clone));
     gameState.historyStack.push(snapshot);
-    if (gameState.historyStack.length > 5) gameState.historyStack.shift();
+    if (gameState.historyStack.length > 10) gameState.historyStack.shift();
 }
 
 function undoLastAction() {
@@ -105,7 +121,7 @@ function resetGame() {
         dealerIndex: 0,
         dealerStreak: 0,
         roundIndex: 0,
-        pendingDebts: { creditorIndex: -1, debts: { 0: 0, 1: 0, 2: 0, 3: 0 } },
+        pendingDebts: [],
         history: [],
         historyStack: []
     });
@@ -234,8 +250,22 @@ function renderStaticHTML() {
     }
 
     const players = gameState.players;
-    document.getElementById('winner-select').innerHTML = players.map((p, i) => `<option value="${i}">${p}</option>`).join('');
-    document.getElementById('loser-select').innerHTML = `<option value="self">自摸 (三家賠)</option>` + players.map((p, i) => `<option value="${i}">${p}</option>`).join('');
+    const winnerContainer = document.getElementById('winner-checkboxes');
+    if (winnerContainer) {
+        winnerContainer.innerHTML = players.map((p, i) => `
+            <div class="flex items-center gap-2 p-3 bg-slate-50 border border-slate-100 rounded-xl hover:bg-slate-100 transition-all">
+                <input type="checkbox" id="winner-${i}" class="winner-checkbox w-4 h-4 text-mahjong border-slate-200 rounded focus:ring-mahjong" data-index="${i}">
+                <label for="winner-${i}" class="text-xs font-black text-slate-700 cursor-pointer flex-1 line-clamp-1">${p}</label>
+            </div>
+        `).join('');
+    }
+    
+    const lSelect = document.getElementById('loser-select');
+    if (lSelect) {
+        lSelect.innerHTML = `<option value="self">自摸 (三家賠)</option>` + 
+            players.map((p, i) => `<option value="${i}">${p}</option>`).join('');
+    }
+    
     document.getElementById('adj-payer').innerHTML = players.map((p, i) => `<option value="${i}">${p}</option>`).join('');
     document.getElementById('adj-payee').innerHTML = players.map((p, i) => `<option value="${i}">${p}</option>`).join('');
 }
@@ -274,6 +304,11 @@ function clearCalcSelections() {
 }
 
 function updateAllUI() {
+    // Safety Migration: Ensure pendingDebts is an array
+    if (gameState.pendingDebts && !Array.isArray(gameState.pendingDebts)) {
+        gameState.pendingDebts = [];
+    }
+
     if (gameState.roundIndex === undefined) gameState.roundIndex = 0;
     const winds = ['東', '南', '西', '北'];
     
@@ -334,32 +369,42 @@ function updateAllUI() {
         </div>
     `).join('');
 
-    const pd = gameState.pendingDebts;
     const content = document.getElementById('pending-debt-content');
-    if (pd.creditorIndex === -1) {
-        content.innerHTML = `<p class="col-span-full text-center py-6 text-white/40 italic font-medium">目前沒有暫存債務，所有賬目已結算。</p>`;
-    } else {
-        let debtHTML = `
-            <div class="space-y-1">
-                <p class="text-xs font-black uppercase text-white/50 tracking-widest">債權人 (Creditor)</p>
-                <p class="text-3xl font-black">${gameState.players[pd.creditorIndex]}</p>
-            </div>
-            <div class="grid grid-cols-3 gap-4">
-        `;
-        gameState.players.forEach((p, i) => {
-            if (i === pd.creditorIndex) return;
-            debtHTML += `
-                <div class="bg-white/10 p-4 rounded-2xl flex flex-col justify-center text-center relative group">
-                    <p class="text-[9px] font-black text-white/40 uppercase mb-1">${p}</p>
-                    <p class="text-lg font-black text-yellow-400 leading-none">$${pd.debts[i] || 0}</p>
-                    ${pd.debts[i] > 0 ? `
-                        <button onclick="settleIndividualDebt(${i})" class="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-lg hover:bg-red-600 transition-all opacity-0 group-hover:opacity-100 ring-2 ring-white">清</button>
-                    ` : ''}
+    if (content) {
+        if (gameState.pendingDebts.length === 0) {
+            content.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-12 text-white/20">
+                    <i class="fa-solid fa-mug-hot text-6xl mb-4 text-white/10"></i>
+                    <p class="font-black italic">目前冇人爭錢，輕鬆啲！</p>
                 </div>
             `;
-        });
-        debtHTML += `</div>`;
-        content.innerHTML = debtHTML;
+        } else {
+            content.innerHTML = gameState.pendingDebts.map((d, idx) => `
+                <div class="bg-white/10 p-5 rounded-3xl flex items-center justify-between group relative border border-white/5 hover:bg-white/20 transition-all">
+                    <div class="flex items-center gap-4">
+                        <div class="flex flex-col">
+                            <span class="text-[10px] font-black text-white/40 uppercase tracking-widest text-left">債主 (Winner)</span>
+                            <span class="text-lg font-black text-white">${gameState.players[d.creditor]}</span>
+                        </div>
+                        <i class="fa-solid fa-arrow-right-long text-yellow-400"></i>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] font-black text-white/40 uppercase tracking-widest text-left">債仔 (Loser)</span>
+                            <span class="text-lg font-black text-white">${gameState.players[d.debtor]}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-6">
+                        <div class="text-right">
+                            <span class="block text-[10px] font-black text-white/40 uppercase tracking-widest">欠款額</span>
+                            <span class="text-3xl font-black text-yellow-400 tracking-tighter shadow-sm">$${d.amount || 0}</span>
+                        </div>
+                        <button onclick="settleIndividualDebt(${idx})" class="w-12 h-12 bg-white/20 hover:bg-red-500 text-white rounded-2xl flex items-center justify-center text-xl transition-all shadow-xl group/btn ring-1 ring-white/10">
+                            <span class="group-hover/btn:hidden font-black">清</span>
+                            <i class="fa-solid fa-check hidden group-hover/btn:block font-black"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
     }
 
     if (gameState.history.length !== lastHistoryLength) {
@@ -405,93 +450,139 @@ function addExtraFans() {
 }
 
 function recordSpecialTransaction() {
-    const winIdx = parseInt(document.getElementById('winner-select').value);
+    // 1. Inputs
+    const winnerCheckboxes = document.querySelectorAll('.winner-checkbox:checked');
+    const winners = Array.from(winnerCheckboxes).map(cb => parseInt(cb.dataset.index));
     const loseVal = document.getElementById('loser-select').value;
     const loseIdx = loseVal === 'self' ? -1 : parseInt(loseVal);
     
-    if (winIdx === loseIdx) return showNotice('贏家與輸家不可相同');
+    if (winners.length === 0) return showNotice('請至少選擇一位贏家');
+    if (winners.includes(loseIdx)) return showNotice('贏家與輸家不可相同');
 
     pushHistory();
 
-    // Now base amount uses the user-specified input value (manual or auto-summed)
-    let totalFans = parseInt(document.getElementById('manual-tai-input').value) || 0;
+    const totalFans = parseInt(document.getElementById('manual-tai-input').value) || 0;
     const baseAmount = gameState.settings.base + (totalFans * gameState.settings.rate);
     
-    let roundDebts = { 0: 0, 1: 0, 2: 0, 3: 0 };
-    if (loseIdx === -1) {
-        [0, 1, 2, 3].forEach(i => {
-            if (i === winIdx) return;
-            roundDebts[i] = baseAmount;
-        });
-    } else {
-        roundDebts[loseIdx] = baseAmount;
-    }
+    // Resolve Sub-Win Transactions (Round Pairs)
+    const roundPairs = [];
+    winners.forEach(w => {
+        const losers = (loseIdx === -1) ? [0, 1, 2, 3].filter(i => !winners.includes(i)) : [loseIdx];
+        losers.forEach(l => roundPairs.push({ w, l, absorbed: false }));
+    });
 
-    const pd = gameState.pendingDebts;
+    const snapshot = JSON.parse(JSON.stringify(gameState.pendingDebts));
+    const newPendingList = [];
+    
+    // Process Each Existing Debt Against Current Round
+    snapshot.forEach(d => {
+        let outcome = "B"; // Default: Stay (Neutral)
+        let relevantPair = null;
 
-    if (pd.creditorIndex === -1) {
-        gameState.pendingDebts = { creditorIndex: winIdx, debts: roundDebts };
-    } 
-    else if (winIdx === pd.creditorIndex) {
-        [0, 1, 2, 3].forEach(i => {
-            if (i === winIdx) return;
-            // 只有當前局輸家（出銃或被自摸）才會觸發 1.5 倍懲罰
-            if (loseIdx === -1 || loseIdx === i) {
-                gameState.pendingDebts.debts[i] = Math.ceil(gameState.pendingDebts.debts[i] * 1.5) + roundDebts[i];
+        // Rule C: Creditor Privilege (Stay or Pull)
+        if (winners.includes(d.creditor)) {
+            // Check if it's a direct PULL (Creditor wins from Debtor)
+            relevantPair = roundPairs.find(p => p.w === d.creditor && p.l === d.debtor);
+            if (relevantPair) {
+                outcome = "C_PULL";
+            } else {
+                outcome = "C_STAY";
             }
-            // 冇輸嘅人，佢嘅舊債項(gameState.pendingDebts.debts[i])唔會改變
-        });
-    } 
-    else {
-        const creditorLost = (loseIdx === pd.creditorIndex || (loseIdx === -1 && winIdx !== pd.creditorIndex));
-        if (creditorLost) {
-            const oldDebtOfWinner = pd.debts[winIdx] || 0;
-            const discountedPenalty = Math.floor(oldDebtOfWinner / 2);
-            [0, 1, 2, 3].forEach(i => {
-                if (i === pd.creditorIndex) return;
-                let payment = (i === winIdx) ? discountedPenalty : (pd.debts[i] || 0);
-                gameState.balances[pd.creditorIndex] += payment;
-                gameState.balances[i] -= payment;
-            });
-            gameState.pendingDebts = { creditorIndex: winIdx, debts: roundDebts };
-        } else {
-            [0, 1, 2, 3].forEach(i => {
-                if (i === pd.creditorIndex) return;
-                let payment = pd.debts[i] || 0;
-                gameState.balances[pd.creditorIndex] += payment;
-                gameState.balances[i] -= payment;
-            });
-            gameState.pendingDebts = { creditorIndex: winIdx, debts: roundDebts };
+        } 
+        // Rule D: Kick (Debtor wins from Creditor)
+        else if (winners.includes(d.debtor) && (loseIdx === d.creditor || (loseIdx === -1 && !winners.includes(d.creditor)))) {
+            // Note: In self-win, loseIdx -1 means everyone not in winners lost.
+            relevantPair = roundPairs.find(p => p.w === d.debtor && p.l === d.creditor);
+            if (relevantPair) outcome = "D_KICK";
         }
-    }
+        // Rule A: Debtor Trigger (Debtor involved without Creditor winning)
+        else {
+            const isDebtorWinner = winners.includes(d.debtor);
+            const isDebtorLoser = (loseIdx === d.debtor || (loseIdx === -1 && !winners.includes(d.debtor)));
+            if (isDebtorWinner || isDebtorLoser) {
+                outcome = "A_SETTLE";
+            }
+        }
 
-    if (winIdx === gameState.dealerIndex) {
+        // Execute Outcome
+        if (outcome === "C_PULL") {
+            relevantPair.absorbed = true;
+            d.amount = Math.ceil(d.amount * 1.5) + baseAmount;
+            newPendingList.push(d);
+            showNotice(`🔥 ${gameState.players[d.creditor]} 繼續拉住 ${gameState.players[d.debtor]}！`);
+        } else if (outcome === "C_STAY") {
+            newPendingList.push(d); // Maintain existing debt
+        } else if (outcome === "D_KICK") {
+            relevantPair.absorbed = true;
+            const kickOldAmount = Math.floor(d.amount * 0.5);
+            // Net Change: Winner gets new win but PAYS BACK half of old debt
+            const netChange = baseAmount - kickOldAmount; 
+            
+            gameState.balances[d.debtor] += netChange;
+            gameState.balances[d.creditor] -= netChange;
+            
+            gameState.history.push({
+                round: "踢半",
+                winner: gameState.players[d.debtor],
+                loser: gameState.players[d.creditor],
+                tai: totalFans,
+                amount: Math.abs(netChange),
+                remark: `⚡ 踢半 (${netChange >= 0 ? '贏' : '輸'} ${Math.abs(netChange)} | 舊${kickOldAmount} vs 新${baseAmount})`
+            });
+            showNotice(`❄️ ${gameState.players[d.debtor]} 極速斷尾！債務清零。`);
+        } else if (outcome === "A_SETTLE") {
+            gameState.balances[d.creditor] += d.amount;
+            gameState.balances[d.debtor] -= d.amount;
+            gameState.history.push({
+                round: "斷線",
+                winner: gameState.players[d.creditor],
+                loser: gameState.players[d.debtor],
+                tai: "-",
+                amount: d.amount,
+                remark: `⚡ 斷線 (結算 ${gameState.players[d.debtor]} -> ${gameState.players[d.creditor]})`
+            });
+            showNotice(`☁️ ${gameState.players[d.debtor]} 捲入其他勝負，債務自動結帳。`);
+        } else {
+            // Scenario B: Neutral Stay
+            newPendingList.push(d);
+        }
+    });
+
+    // Handle Unabsorbed Winner Pairs (New Pends)
+    roundPairs.forEach(p => {
+        if (!p.absorbed) {
+            newPendingList.push({
+                creditor: p.w,
+                debtor: p.l,
+                amount: baseAmount
+            });
+        }
+    });
+
+    gameState.pendingDebts = newPendingList;
+
+    // --- Dealer State Update ---
+    const isDealerWinning = winners.includes(gameState.dealerIndex);
+    if (isDealerWinning) {
         gameState.dealerStreak += 1;
     } else {
-        if (gameState.dealerIndex === 3) {
-            gameState.roundIndex = (gameState.roundIndex + 1) % 4;
-        }
+        if (gameState.dealerIndex === 3) gameState.roundIndex = (gameState.roundIndex + 1) % 4;
         gameState.dealerIndex = (gameState.dealerIndex + 1) % 4;
         gameState.dealerStreak = 0;
     }
 
-    const remark_parts = [];
-    if (gameState.dealerIndex === winIdx && gameState.dealerStreak > 0) remark_parts.push(`庄x${gameState.dealerStreak}`);
-    if (pd.creditorIndex === winIdx) remark_parts.push(`連勝1.5x`);
-    if (loseIdx === pd.creditorIndex) remark_parts.push(`反擊50%`);
-    if (loseIdx === -1) remark_parts.push(`自摸`);
-
     gameState.history.push({
         round: gameState.history.length + 1,
-        winner: gameState.players[winIdx],
+        winner: winners.map(i => gameState.players[i]).join(' & '),
         loser: loseIdx === -1 ? "三家" : gameState.players[loseIdx],
         tai: totalFans,
-        amount: baseAmount,
-        remark: remark_parts.join(' | ') || "普通出銃"
+        amount: baseAmount * (loseIdx === -1 ? 3 : 1),
+        remark: `${winners.length > 1 ? '一炮多響 | ' : ''}${isDealerWinning ? '連莊 | ' : ''}${loseIdx === -1 ? '自摸' : '出銃'}`
     });
 
     save();
-    showNotice('入帳成功 (待結算)');
+    showNotice('入帳成功');
+    clearCalcSelections();
 }
 
 function toggleManualModal(show) {
@@ -640,49 +731,30 @@ function switchTab(tabId) {
 }
 
 // --- Settlement (截數) ---
-window.settleIndividualDebt = function(playerIndex) {
-    console.log("Settling debt for player:", playerIndex);
-    const pd = gameState.pendingDebts;
-    if (pd.creditorIndex === -1 || !pd.debts || pd.debts[playerIndex] === undefined) {
-        console.error("Invalid settlement state:", pd);
-        return;
-    }
+window.settleIndividualDebt = function(debtIndex) {
+    const d = gameState.pendingDebts[debtIndex];
+    if (!d) return;
 
-    const amount = pd.debts[playerIndex];
-    if (amount <= 0) return;
+    pushHistory();
+    
+    // Move to Permanent Balances
+    gameState.balances[d.creditor] += d.amount;
+    gameState.balances[d.debtor] -= d.amount;
 
-    // Record the settlement in permanent balances
-    gameState.balances[pd.creditorIndex] += amount;
-    gameState.balances[playerIndex] -= amount;
-
-    // Add to transaction history
     gameState.history.push({
         round: "截數",
-        winner: gameState.players[pd.creditorIndex],
-        loser: gameState.players[playerIndex],
+        winner: gameState.players[d.creditor],
+        loser: gameState.players[d.debtor],
         tai: "-",
-        amount: amount,
-        remark: `⚡ 截數 (找清欠 ${gameState.players[pd.creditorIndex]} 的 $${amount})`
+        amount: d.amount,
+        remark: `⚡ 截數 (結清 ${gameState.players[d.debtor]} -> ${gameState.players[d.creditor]})`
     });
 
-    // Clear the specific debt
-    pd.debts[playerIndex] = 0;
+    // Remove from array
+    gameState.pendingDebts.splice(debtIndex, 1);
 
-    // Check if all debts are cleared
-    const remainingDebt = Object.values(pd.debts).reduce((a, b) => a + (b || 0), 0);
-    if (remainingDebt === 0) {
-        pd.creditorIndex = -1;
-    }
-
-    // CRITICAL: Must use the correct save function name
-    if (typeof saveState === 'function') {
-        saveState();
-    } else if (typeof save === 'function') {
-        save();
-    }
-    
-    updateAllUI();
-    showNotice(`${gameState.players[playerIndex]} 已截數找清`);
+    save();
+    showNotice(`已結清一條債務`);
 };
 
 document.addEventListener("DOMContentLoaded", init);
