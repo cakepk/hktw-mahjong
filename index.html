@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>港式台牌小帳本 (倍半/拉莊特化版)</title>
+    <title>港式台灣麻雀記帳本 | ADMINISTRATIVE LEDGER SYSTEM</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome -->
@@ -29,6 +29,14 @@
         .btn-fan.active .target-fan, #extra-fan-card.active #extra-fan-display { color: #86efac !important; }
         .btn-fan.active .target-example { color: #dcfce7 !important; }
         .btn-fan.active .target-example span { color: #1e293b !important; }
+        
+        /* Stats Specific */
+        .medal-gold { background: linear-gradient(135deg, #FFD700 0%, #B8860B 100%); color: #1e293b; }
+        .medal-loss { background: linear-gradient(135deg, #4A3B3B 0%, #2D2424 100%); color: #fecaca; }
+        .stat-card { backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1); }
+        .h2h-win { color: #22c55e; font-weight: 900; }
+        .h2h-zero { color: #ef4444; font-weight: 400; opacity: 0.5; }
+        .chart-grid { stroke: rgba(0,0,0,0.05); stroke-width: 1; }
     </style>
 </head>
 <body class="pb-24">
@@ -37,8 +45,13 @@
     <nav class="sticky top-0 z-50 glass border-b border-slate-200 px-6 py-4">
         <div class="max-w-5xl mx-auto flex justify-between items-center">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 bg-mahjong text-white flex items-center justify-center rounded-xl shadow-lg ring-2 ring-green-100">🀄</div>
-                <h1 class="text-xl font-black text-mahjong italic">港式台牌小帳本</h1>
+                <div class="w-12 h-12 flex items-center justify-center rounded-xl overflow-hidden shadow-sm border border-slate-100 bg-white p-1">
+                    <img src="assets/logo.png" class="w-full h-full object-contain">
+                </div>
+                <div class="flex flex-col">
+                    <h1 class="text-xl font-black text-mahjong italic leading-tight">港式台灣麻雀記帳本</h1>
+                    <p class="text-[8px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">ADMINISTRATIVE LEDGER SYSTEM</p>
+                </div>
             </div>
             <div class="flex gap-2">
                 <button onclick="undoLastAction()" class="px-4 py-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 transition-all font-bold text-xs flex items-center gap-2">
@@ -54,6 +67,7 @@
             <button onclick="switchTab('teach')" id="tab-teach" class="btn-tab flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase transition-all tracking-widest active">📚 教學</button>
             <button onclick="switchTab('calc')" id="tab-calc" class="btn-tab flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase transition-all tracking-widest opacity-60">🧮 計番</button>
             <button onclick="switchTab('ledger')" id="tab-ledger" class="btn-tab flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase transition-all tracking-widest opacity-60">💰 記帳</button>
+            <button onclick="switchTab('stats')" id="tab-stats" class="btn-tab flex-1 py-3 px-4 rounded-xl text-xs font-black uppercase transition-all tracking-widest opacity-60">📊 戰績</button>
         </div>
     </nav>
 
@@ -303,8 +317,59 @@
                     </div>
 
                     <button onclick="saveSpecialSettings()" class="w-full py-3 bg-slate-800 hover:bg-slate-700 transition-colors text-white rounded-xl text-sm font-bold shadow-md">儲存並更新介面</button>
+                    
                 </div>
             </div>
+        </div>
+
+        <!-- Tab 4: 戰績數據 (STATS) -->
+        <div id="view-stats" class="tab-view hidden space-y-10">
+            <!-- Part 1: Fate Line Chart (命運曲線) -->
+            <section class="space-y-6">
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h3 class="text-3xl font-black text-slate-800 italic">📈 命運曲線</h3>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">THE FATE LINE (STEPPED)</p>
+                    </div>
+                    <button onclick="exportAsImage()" class="px-6 py-3 bg-white border-2 border-slate-800 text-slate-800 rounded-2xl font-black text-sm hover:bg-slate-800 hover:text-white transition-all shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-camera"></i> 📸 一鍵截圖 (EXPORT PNG)
+                    </button>
+                </div>
+                <div class="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden relative">
+                    <div id="stats-chart-legends" class="flex gap-4 mb-4 justify-center"></div>
+                    <div id="stats-chart-container" class="w-full h-[400px] relative">
+                        <!-- SVG Chart will be injected here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Part 2: Medals (雀壇稱號) -->
+            <section class="space-y-6">
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h3 class="text-3xl font-black text-slate-800 italic">📊 戰績焦點</h3>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">SESSION HIGHLIGHTS</p>
+                    </div>
+                </div>
+                <div id="stats-medals-grid" class="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                    <!-- Medals will be here -->
+                </div>
+            </section>
+
+            <!-- Part 3: Performance Scorecard (數據總表) -->
+            <section class="space-y-6">
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h3 class="text-3xl font-black text-slate-800 italic">📊 數據總表</h3>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">PERFORMANCE SCORECARD</p>
+                    </div>
+                </div>
+                <div class="bg-[#1a1a1a] p-4 xl:p-8 rounded-[2rem] xl:rounded-[3rem] shadow-xl overflow-hidden border border-[#2a2a2a]">
+                    <div id="stats-scorecard-container" class="overflow-x-auto">
+                        <!-- Scorecard Table will be here -->
+                    </div>
+                </div>
+            </section>
         </div>
 
     </main>
@@ -331,7 +396,7 @@
                 </div>
                 <div class="col-span-full space-y-2">
                     <label class="text-[10px] font-black uppercase text-slate-400">備註 (Remarks)</label>
-                    <input type="text" id="adj-remark" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" placeholder="例如：飯錢、借錢...">
+                    <input type="text" id="adj-remark" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" placeholder="輸入備註內容...">
                 </div>
             </div>
             <button onclick="submitManualAdjustment()" class="w-full py-5 bg-slate-800 text-white rounded-2xl font-black hover:scale-[1.02] transition-all">確認入帳 (POST MANUAL)</button>
@@ -355,7 +420,73 @@
     <!-- Toast -->
     <div id="toast"></div>
 
-    <script src="data.js"></script>
-    <script src="logic.js"></script>
+    <!-- Export Template (Hidden) -->
+    <div id="export-summary-wrap" style="position: fixed; left: -9999px; top: 0; width: 1000px; font-family: 'Inter', sans-serif;">
+        <div id="export-summary-container" class="bg-white p-12 relative border border-slate-200" style="background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size: 20px 20px;">
+            <!-- Header -->
+            <div class="flex justify-between items-start mb-8 border-b-4 border-slate-800 pb-6">
+                <div class="flex items-center gap-6">
+                    <div class="h-24 w-24 bg-white rounded-3xl flex items-center justify-center shadow-sm border-2 border-slate-200 overflow-hidden p-2">
+                        <img src="assets/logo.png" class="w-full h-full object-contain">
+                    </div>
+                    <div class="flex flex-col justify-center">
+                        <h1 class="text-4xl font-black text-slate-800 uppercase italic tracking-tighter">港式台灣麻雀記帳本</h1>
+                        <p class="text-sm font-bold text-amber-600 uppercase tracking-[0.3em] mt-1">ADMINISTRATIVE LEDGER SYSTEM</p>
+                    </div>
+                </div>
+                <div class="text-right whitespace-nowrap">
+                    <p id="export-date" class="text-2xl font-black text-slate-800 tracking-tighter"></p>
+                </div>
+            </div>
+
+            <!-- Main Stats - Final Balance -->
+            <div class="mb-10 p-8 border-2 border-slate-800 rounded-3xl bg-slate-50 relative overflow-hidden">
+                <div class="absolute top-0 right-0 p-4 opacity-10 font-black text-6xl italic text-slate-800 uppercase">Balance</div>
+                <h2 class="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">💰 最終損益 (Final Balance)</h2>
+                <div id="export-rankings" class="grid grid-cols-2 gap-y-6 gap-x-12">
+                    <!-- Rankings will be injected -->
+                </div>
+            </div>
+
+            <!-- Two Columns for Medals/Defense -->
+            <div class="grid grid-cols-2 gap-8 mb-10">
+                <!-- Column 1: Technical Metrics -->
+                <div class="p-8 border-2 border-slate-800 rounded-3xl bg-white relative">
+                    <h2 class="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">📋 技術指標紀錄 (Technical)</h2>
+                    <ul id="export-tech-metrics" class="space-y-4 text-lg font-bold text-slate-700">
+                        <!-- Metrics injected -->
+                    </ul>
+                </div>
+                <!-- Column 2: Defense Records -->
+                <div class="p-8 border-2 border-slate-800 rounded-3xl bg-white relative">
+                    <h2 class="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">🛡️ 防守統計紀錄 (Defense)</h2>
+                    <ul id="export-defense-records" class="space-y-4 text-lg font-bold text-slate-700">
+                        <!-- Metrics injected -->
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Fate Line Chart -->
+            <div class="p-8 border-2 border-slate-800 rounded-3xl bg-white relative">
+                <h2 class="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">命運曲線 ( Fate Line )</h2>
+                <div id="export-chart-container" class="w-full h-[300px] relative mt-10">
+                    <!-- SVG Snapshot will be injected -->
+                </div>
+                <div class="mt-8 pt-6 border-t border-slate-100 flex justify-between text-xs text-slate-400 font-bold uppercase tracking-widest">
+                    <span>基礎由數據自動計算</span>
+                    <span>數據量: <span id="export-data-count">0</span> | 精確度: HIGH</span>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="mt-8 text-center">
+                <p id="export-footer-text" class="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="data.js?v=2"></script>
+    <script src="logic.js?v=2"></script>
 </body>
 </html>
